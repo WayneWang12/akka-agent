@@ -1,0 +1,11 @@
+[repositories]
+    local
+    aliyun-ivy: http://maven.aliyun.com/nexus/content/groups/public, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]
+    aliyun-maven: http://maven.aliyun.com/nexus/content/groups/public
+    repo2-ivy:http://repo1.maven.org/maven2, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]
+    repo2:http://repo1.maven.org/maven2/
+    typesafe-mave:https://dl.bintray.com/typesafe/maven-releases/
+    ivy-typesafe:https://dl.bintray.com/typesafe/ivy-releases, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]
+    ivy-sbt-plugin:https://dl.bintray.com/sbt/sbt-plugin-releases/, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]
+    sonatype:https://oss.sonatype.org/content/repositories/snapshots
+

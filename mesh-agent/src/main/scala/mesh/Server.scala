@@ -2,7 +2,7 @@ package mesh
 
 import java.util.NoSuchElementException
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, Props}
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
 
@@ -14,18 +14,27 @@ object Server extends App {
   val config = ConfigFactory.load()
 
   val serviceType = config.getString("type")
+  val serverPort = config.getInt("server.port")
+
+  val hostIp = IpHelper.getHostIp
 
   serviceType match {
     case "consumer" =>
-      val consumer = new Consumer()
-      consumer.startService
+      actorSystem.actorOf(Props(new Consumer(hostIp)), "consumer-agent")
     case "provider" =>
-      val port = config.getInt("server.port")
       val dubboPort = config.getInt("dubbo.protocol.port")
-      val provider = new Provider("localhost", port, dubboPort)
+      val provider = new Provider(hostIp, serverPort, dubboPort)
       provider.startService
     case _ =>
       throw new NoSuchElementException("No such service!")
   }
+
+  val etcdHost = config.getString("etcd.url")
+
+  val etcdManager = actorSystem.actorOf(Props(
+    new EtcdManager(etcdHost, serverPort)
+  ).withDispatcher("pinned-dispatcher"))
+
+  etcdManager ! serviceType
 
 }
