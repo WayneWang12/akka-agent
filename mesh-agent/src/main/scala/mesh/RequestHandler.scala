@@ -19,9 +19,9 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       val num = endpoint.port match {
         case 30000 => 1
-        case 30001 => 3
-        case 30002 => 6
-        case _     => 3
+        case 30001 => 2
+        case 30002 => 3
+        case _     => 2
       }
       List.fill(num)(tcp)
     }
