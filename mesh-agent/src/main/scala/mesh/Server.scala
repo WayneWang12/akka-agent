@@ -16,6 +16,15 @@ object Server extends App {
   val serviceType = config.getString("type")
   val serverPort = config.getInt("server.port")
 
+  actorSystem.log.info("Available processors (cores): " + Runtime.getRuntime.availableProcessors())
+
+  actorSystem.log.info("Free memory (bytes): " +
+    Runtime.getRuntime.freeMemory())
+
+  val maxMemory = Runtime.getRuntime.maxMemory
+
+  actorSystem.log.info("Maximum memory (bytes): " + maxMemory)
+
   val hostIp = IpHelper.getHostIp
 
   serviceType match {
