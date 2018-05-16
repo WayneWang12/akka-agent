@@ -12,11 +12,11 @@ RUN apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 2EE0EA64E40A89B
 RUN apt-get update -y  && apt-get install -y sbt
 RUN mkdir -p /root/.sbt
 COPY ./repositories /root/.sbt
-RUN git clone https://github.com/WayneWang12/akka-sample.git && cd akka-sample && git show -s --format=%B && sbt compile
+RUN git clone https://github.com/WayneWang12/akka-sample.git && cd akka-sample  && sbt compile
 
 COPY . /root/workspace/agent
 WORKDIR /root/workspace/agent
-RUN set -ex && sbt clean compile assembly
+RUN set -ex && git show -s --format=%B &&  sbt clean compile assembly
 
 
 # Runner container
