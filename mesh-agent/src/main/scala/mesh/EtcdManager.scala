@@ -15,8 +15,6 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
 
   val client: Client = Client.builder().endpoints(etcdUrl).build()
 
-  import scala.concurrent.duration._
-
   val kvClient = client.getKVClient
   val lease = client.getLeaseClient
 
@@ -25,8 +23,6 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
 
   private val rootPath = "dubbomesh"
   private val serviceName = "com.alibaba.dubbo.performance.demo.provider.IHelloService"
-
-  import context.dispatcher
 
   var endpoints = Set.empty[Endpoint]
 
