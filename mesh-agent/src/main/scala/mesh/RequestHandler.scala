@@ -20,11 +20,11 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       val num = endpoint.port match {
         case 30000 =>
-          tcp.throttle(400, 1.second)
+          tcp.throttle(500, 1.second)
         case 30001 =>
-          tcp.throttle(1500, 1.second)
+          tcp.throttle(1800, 1.second)
         case 30002 =>
-          tcp.throttle(3000, 1.second)
+          tcp.throttle(2700, 1.second)
         case _     => 2
           tcp.throttle(400, 1.second)
       }
