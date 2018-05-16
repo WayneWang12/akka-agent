@@ -26,7 +26,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
           5
         case 30002 =>
 //          tcp.throttle(2700, 1.second)
-          8
+          10
         case _     =>
           4
       }
