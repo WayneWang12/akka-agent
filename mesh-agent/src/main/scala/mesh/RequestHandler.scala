@@ -21,7 +21,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val num = endpoint.port match {
         case 30000 =>
 //          tcp.throttle(20, 55.millis)
-          1
+          2
         case 30001 =>
 //          tcp.throttle(80, 55.millis)
           8
