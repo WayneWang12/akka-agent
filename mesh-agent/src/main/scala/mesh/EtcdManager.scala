@@ -38,7 +38,6 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
         log.info(s"found new endpoints $found")
         context.system.eventStream.publish(EndpointsUpdate(endpoints))
       }
-      context.system.scheduler.scheduleOnce(1.second, self, "consumer")
     case "provider" =>
       try {
         val id = lease.grant(30).get.getID
