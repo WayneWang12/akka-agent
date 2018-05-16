@@ -11,6 +11,7 @@ import scala.util.Success
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
+  import scala.concurrent.duration._
 
   context.system.eventStream.subscribe(self, classOf[EndpointsUpdate])
 
@@ -19,14 +20,13 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       val num = endpoint.port match {
         case 30000 =>
-//          tcp.throttle(500, 1.second)
+          tcp.throttle(40, 53.millis)
           0
         case 30001 =>
-//          tcp.throttle(1800, 1.second)
-          1
+          0
         case 30002 =>
 //          tcp.throttle(2700, 1.second)
-          0
+          1
         case _     =>
           4
       }
