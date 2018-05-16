@@ -21,14 +21,18 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val num = endpoint.port match {
         case 30000 =>
           tcp.throttle(30, 55.millis)
+          0
         case 30001 =>
           tcp.throttle(50, 55.millis)
+          1
         case 30002 =>
           tcp.throttle(180, 55.millis)
+          0
         case _     =>
           tcp
+          0
       }
-      List.fill(1)(num)
+      List.fill(num)(tcp)
     }
 
     Flow.fromGraph(GraphDSL.create(tcpFlows) { implicit builder =>
