@@ -17,7 +17,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
   def endpointsFlow(endpoints: Set[Endpoint]) = {
     val tcpFlows = endpoints.toList.flatMap { endpoint =>
-      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port)
+      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       val num = endpoint.port match {
         case 30000 =>
 //          tcp.throttle(20, 55.millis)
