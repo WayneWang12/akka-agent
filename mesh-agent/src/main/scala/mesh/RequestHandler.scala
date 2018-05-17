@@ -17,14 +17,14 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
   def endpointsFlow(endpoints: Set[Endpoint]) = {
     val tcpFlows = endpoints.toList.flatMap { endpoint =>
-      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
+      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port)
       val num = endpoint.port match {
         case 30000 =>
 //          tcp.throttle(20, 55.millis)
-          2
+          1
         case 30001 =>
 //          tcp.throttle(80, 55.millis)
-          8
+          9
         case 30002 =>
 //          tcp.throttle(150, 55.millis)
           9
@@ -43,7 +43,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
         val bigMerge = builder.add(Merge[(Long, ByteString)](tcpFlows.size))
 
         tcpFlows.foreach { tcp =>
-          balance ~> tcp ~> DubboFlow.decoder.async ~> bigMerge
+          balance ~> tcp ~> DubboFlow.decoder ~> bigMerge
         }
 
         FlowShape(balance.in, bigMerge.out)
