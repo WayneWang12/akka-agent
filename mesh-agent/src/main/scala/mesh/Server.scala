@@ -16,20 +16,21 @@ object Server extends App {
     config = ConfigFactory.parseString("akka.actor.default-dispatcher.fork-join-executor.parallelism-factor = 0.125").withFallback(config)
   }
 
-
   implicit val actorSystem: ActorSystem = ActorSystem("dubbo-mesh", config)
   implicit val materializer: ActorMaterializer = ActorMaterializer()
 
-
   val hostIp = IpHelper.getHostIp
 
-  serviceType match {
+  val msg = serviceType match {
     case "consumer" =>
       actorSystem.actorOf(Props(new Consumer(hostIp)), "consumer-agent")
+      serviceType
     case "provider" =>
       val dubboPort = config.getInt("dubbo.protocol.port")
+      val scale = config.getString("scale")
       val provider = new Provider(hostIp, serverPort, dubboPort)
       provider.startService
+      (serviceType, ProviderScale.withName(scale))
     case _ =>
       throw new NoSuchElementException("No such service!")
   }
@@ -40,6 +41,6 @@ object Server extends App {
     new EtcdManager(etcdHost, serverPort)
   ))
 
-  etcdManager ! serviceType
+  etcdManager ! msg
 
 }

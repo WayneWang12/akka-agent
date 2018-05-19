@@ -42,8 +42,6 @@ class ConnectionHandler(connectionId: Long,
                         connection: ActorRef,
                         requestHandler: ActorRef) extends Actor {
 
-  //todo try to set request timeout.
-
   override def receive: Receive = {
     case Received(data) ⇒
       requestHandler ! (connectionId, data)

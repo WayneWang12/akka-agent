@@ -18,70 +18,50 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
   def endpointsFlow(endpoints: Set[Endpoint]) = {
     val tcpFlows = endpoints.toList.flatMap { endpoint =>
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
-      val num = endpoint.port match {
-        case 30000 =>
-//          tcp.throttle(20, 55.millis)
+      val num = endpoint.scale match {
+        case ProviderScale.Small =>
+          //          tcp.throttle(20, 55.millis)
           1
-        case 30001 =>
-//          tcp.throttle(80, 55.millis)
-          9
-        case 30002 =>
-//          tcp.throttle(150, 55.millis)
-          9
-        case _     =>
-//          tcp
+        case ProviderScale.Medium =>
+          //          tcp.throttle(80, 55.millis)
+          2
+        case ProviderScale.Large =>
+          //          tcp.throttle(150, 55.millis)
+          3
+        case _ =>
+          //          tcp
           0
       }
       List.fill(num)(tcp)
     }
 
-    Flow.fromGraph(GraphDSL.create(tcpFlows) { implicit builder =>
+    Sink.fromGraph(GraphDSL.create(tcpFlows) { implicit builder =>
       tcpFlows =>
         import GraphDSL.Implicits._
-
         val balance = builder.add(Balance[ByteString](tcpFlows.size))
-        val bigMerge = builder.add(Merge[(Long, ByteString)](tcpFlows.size))
-
         tcpFlows.foreach { tcp =>
-          balance ~> tcp ~> DubboFlow.decoder ~> bigMerge
+          balance ~> tcp ~> DubboFlow.decoder.async
         }
 
-        FlowShape(balance.in, bigMerge.out)
+        SinkShape(balance.in)
     })
   }
-
 
   def getSourceByEndpoints(endpoints: Set[Endpoint]) = {
     val handleFlow = Flow[(Long, ByteString)]
       .via(DubboFlow.connectionIdFlow)
-      .via(endpointsFlow(endpoints))
+      .to(endpointsFlow(endpoints))
     Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
-      .via(handleFlow).to(Sink.foreach {
-      case (connectionId, bs) =>
-        val actor = context.actorSelection(s"/user/consumer-agent/$connectionId")
-        actor ! bs
-    }).run()
+      .to(handleFlow).run()
   }
 
-  var endpoints = List(30000, 30001, 30002).map(port => Endpoint("localhost", port))
-
-  var source: Option[SourceQueueWithComplete[(Long, ByteString)]] = None
-
-  import context.dispatcher
+  var source: SourceQueueWithComplete[(Long, ByteString)] = _
 
   override def receive: Receive = {
     case (cid: Long, bs: ByteString) =>
-      source.foreach(_.offer(cid -> bs))
+      source.offer(cid -> bs)
     case EndpointsUpdate(newEndpoints) =>
-      source.foreach {
-        s =>
-          s.complete()
-          s.watchCompletion().onComplete {
-            case Success(_) =>
-              log.info(s"new endpoints $newEndpoints found. Close old ones.")
-          }
-      }
       log.info(s"start new source for endpoints $newEndpoints")
-      source = Some(getSourceByEndpoints(newEndpoints))
+      source = getSourceByEndpoints(newEndpoints)
   }
 }

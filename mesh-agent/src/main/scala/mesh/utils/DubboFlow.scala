@@ -3,9 +3,12 @@ package mesh.utils
 import java.io.{ByteArrayOutputStream, OutputStream, OutputStreamWriter, PrintWriter}
 import java.util.concurrent.atomic.AtomicLong
 
-import akka.NotUsed
-import akka.stream.scaladsl.{Flow, Source}
+import akka.{Done, NotUsed}
+import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
+import mesh.Server
+
+import scala.concurrent.Future
 
 object DubboFlow {
 
@@ -92,21 +95,24 @@ object DubboFlow {
   val connectionIdFlow: Flow[(Long, ByteString), ByteString, NotUsed] =
     Flow[(Long, ByteString)].map {
       case (cid, bs) =>
-        val n = bs.indexOfSlice(slicer)
-        val s = bs.drop(n + slicer.size)
-        val d = quote +: (s ++ quoteAndCarriageReturn)
-        map2DubboByteString(cid, d)
+        http2DubboByteString(cid, bs)
 
     }
 
-  val decoder = Flow[ByteString].flatMapConcat {
+   def http2DubboByteString(cid: Long, bs: ByteString): ByteString = {
+    val n = bs.indexOfSlice(slicer)
+    val s = bs.drop(n + slicer.size)
+    val d = quote +: (s ++ quoteAndCarriageReturn)
+    map2DubboByteString(cid, d)
+  }
+
+  val decoder: Sink[ByteString, Future[Done]] = Sink.foreach[ByteString] {
     bs =>
-      Source(
-        unpackingDubboByteString(bs).map { t =>
+        unpackingDubboByteString(bs).foreach { t =>
           val resp = httpStatus ++ cLength(t._2.size) ++ kAlive ++ ctype ++ headerDelimter ++ t._2
-          (t._1, resp)
+          val actor = Server.actorSystem.actorSelection(s"/user/consumer-agent/${t._1}")
+          actor ! resp
         }
-      )
   }
 
 
