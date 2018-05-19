@@ -2,56 +2,52 @@ package mesh
 
 import akka.actor.{Actor, ActorLogging}
 import akka.stream._
-import akka.stream.scaladsl.{Balance, Flow, GraphDSL, Merge, Sink, Source, SourceQueueWithComplete, Tcp}
+import akka.stream.scaladsl.{Balance, Flow, Sink, Source, SourceQueueWithComplete, Tcp}
 import akka.util.ByteString
 import mesh.utils.DubboFlow
 
-import scala.util.Success
+import scala.concurrent.Future
+
 
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
+
   import scala.concurrent.duration._
 
   context.system.eventStream.subscribe(self, classOf[EndpointsUpdate])
 
+  def throttleTcp(num: Int, tcp: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]]) = {
+    val list = List.fill(3)(tcp.async.buffer(256, OverflowStrategy.backpressure).to(DubboFlow.decoder))
+    val flow = Flow[ByteString].throttle(num, 50.millis)
+    val sink = Sink.combine(list.head, list(1), list(2))(Balance[ByteString](_))
+    flow.to(sink)
+  }
+
   def endpointsFlow(endpoints: Set[Endpoint]) = {
-    val tcpFlows = endpoints.toList.flatMap { endpoint =>
-      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
-      val num = endpoint.scale match {
+    val tcpFlows = endpoints.toList.map { endpoint =>
+      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port)
+      endpoint.scale match {
         case ProviderScale.Small =>
-          //          tcp.throttle(20, 55.millis)
-          1
+          throttleTcp(30, tcp)
         case ProviderScale.Medium =>
-          //          tcp.throttle(80, 55.millis)
-          2
+          throttleTcp(100, tcp)
         case ProviderScale.Large =>
-          //          tcp.throttle(150, 55.millis)
-          3
-        case _ =>
-          //          tcp
-          0
+          throttleTcp(150, tcp)
       }
-      List.fill(num)(tcp)
     }
-
-    Sink.fromGraph(GraphDSL.create(tcpFlows) { implicit builder =>
-      tcpFlows =>
-        import GraphDSL.Implicits._
-        val balance = builder.add(Balance[ByteString](tcpFlows.size))
-        tcpFlows.foreach { tcp =>
-          balance ~> tcp ~> DubboFlow.decoder.async
-        }
-
-        SinkShape(balance.in)
-    })
+    Sink.combine(tcpFlows.head, tcpFlows(1), tcpFlows(2))(Balance[ByteString](_))
   }
 
   def getSourceByEndpoints(endpoints: Set[Endpoint]) = {
     val handleFlow = Flow[(Long, ByteString)]
+      .async
       .via(DubboFlow.connectionIdFlow)
+      .async
+      .buffer(256, OverflowStrategy.backpressure)
       .to(endpointsFlow(endpoints))
-    Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
+      .async
+    Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure).async
       .to(handleFlow).run()
   }
 

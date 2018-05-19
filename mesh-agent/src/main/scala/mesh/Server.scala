@@ -8,15 +8,12 @@ import com.typesafe.config.ConfigFactory
 
 object Server extends App {
 
-  var config = ConfigFactory.load()
+  val config = ConfigFactory.load()
+
   val serviceType = config.getString("type")
   val serverPort = config.getInt("server.port")
 
-  if(serviceType == "provider") {
-    config = ConfigFactory.parseString("akka.actor.default-dispatcher.fork-join-executor.parallelism-factor = 0.125").withFallback(config)
-  }
-
-  implicit val actorSystem: ActorSystem = ActorSystem("dubbo-mesh", config)
+  implicit val actorSystem: ActorSystem = ActorSystem("dubbo-mesh")
   implicit val materializer: ActorMaterializer = ActorMaterializer()
 
   val hostIp = IpHelper.getHostIp
