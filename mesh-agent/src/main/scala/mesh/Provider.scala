@@ -2,16 +2,14 @@ package mesh
 
 import akka.Done
 import akka.actor.ActorSystem
-import akka.stream.{Materializer, OverflowStrategy}
-import akka.stream.scaladsl.{Flow, Tcp}
-import akka.util.ByteString
+import akka.stream.Materializer
+import akka.stream.scaladsl.Tcp
 
 import scala.concurrent.Future
 
 class Provider(host: String, port: Int, dubboPort: Int)(implicit actorSystem: ActorSystem, materializer: Materializer) {
 
-  val handleFlow: Flow[ByteString, ByteString, Future[Tcp.OutgoingConnection]] =
-    Tcp().outgoingConnection(host, dubboPort).buffer(256, OverflowStrategy.backpressure)
+  val handleFlow = Tcp().outgoingConnection(host, dubboPort)
 
   def startService: Future[Done] = {
     Tcp().bind(host, port).runForeach { conn =>

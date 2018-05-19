@@ -3,17 +3,16 @@ package mesh.utils
 import java.io.{ByteArrayOutputStream, OutputStream, OutputStreamWriter, PrintWriter}
 import java.util.concurrent.atomic.AtomicLong
 
-import akka.{Done, NotUsed}
-import akka.stream.scaladsl.{Flow, Sink, Source}
+import akka.actor.ActorSystem
+import akka.stream.scaladsl.{Flow, Sink}
 import akka.util.ByteString
-import mesh.Server
+import akka.{Done, NotUsed}
 
 import scala.concurrent.Future
 
 object DubboFlow {
 
   private val HEADER_LENGTH = 16
-  private val requestId = new AtomicLong()
 
   private val MAGIC = 0xdabb.toShort
   private val FLAG_REQUEST = 0x80.toByte
@@ -39,30 +38,20 @@ object DubboFlow {
     val header = new Array[Byte](HEADER_LENGTH)
     // set magic number.
     Bytes.short2bytes(MAGIC, header)
-
     // set request and serialization flag.
     header(2) = (FLAG_REQUEST | 6).toByte
-
     header(2) = (header(2) | FLAG_TWOWAY).toByte
-
     Bytes.long2bytes(requestId, header, 4)
-
     val out = new ByteArrayOutputStream()
-
     val writer = new PrintWriter(new OutputStreamWriter(out))
-
     JsonUtils.writeBytes(parameter.toArray, writer)
-
     val bos = new ByteArrayOutputStream
     encodeRequestData(bos,
       interface,
       method, pType,
       out.toByteArray)
-
     val len = bos.size()
-
     Bytes.int2bytes(len, header, 12)
-
     ByteString(header ++ bos.toByteArray)
   }
 
@@ -76,7 +65,6 @@ object DubboFlow {
         unpacking(data.drop(19 + string.length), (id -> string) :: list)
       } else list
     }
-
     unpacking(data, List.empty)
   }
 
@@ -106,14 +94,12 @@ object DubboFlow {
     map2DubboByteString(cid, d)
   }
 
-  val decoder: Sink[ByteString, Future[Done]] = Sink.foreach[ByteString] {
+  def decoder(implicit actorSystem: ActorSystem): Sink[ByteString, Future[Done]] = Sink.foreach[ByteString] {
     bs =>
         unpackingDubboByteString(bs).foreach { t =>
           val resp = httpStatus ++ cLength(t._2.size) ++ kAlive ++ ctype ++ headerDelimter ++ t._2
-          val actor = Server.actorSystem.actorSelection(s"/user/consumer-agent/${t._1}")
+          val actor = actorSystem.actorSelection(s"/user/consumer-agent/${t._1}")
           actor ! resp
         }
   }
-
-
 }

@@ -8,7 +8,6 @@ import mesh.utils.DubboFlow
 
 import scala.concurrent.duration._
 
-
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
@@ -16,35 +15,33 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
   context.system.eventStream.subscribe(self, classOf[EndpointsUpdate])
 
   def endpointsFlow(endpoints: Set[Endpoint]) = {
-    val tcpFlows = endpoints.toList.map { endpoint =>
-      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port)
+    val tcpFlows = endpoints.toList.flatMap { endpoint =>
+      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       endpoint.scale match {
         case ProviderScale.Small =>
-          tcp.throttle(50, 50.millis).async
+          List.fill(1)(tcp.throttle(40, 50.millis))
         case ProviderScale.Medium =>
-          tcp.throttle(100, 50.millis).async
+          List.fill(2)(tcp)
         case ProviderScale.Large =>
-          tcp.throttle(150, 50.millis).async
+          List.fill(3)(tcp)
       }
     }
     Sink.fromGraph(GraphDSL.create(tcpFlows) {implicit builder => tcps =>
       import GraphDSL.Implicits._
       val balancer = builder.add(Balance[ByteString](tcps.size))
       val merge = builder.add(Merge[ByteString](tcps.size))
+      val sink = DubboFlow.decoder
       tcps.foreach {tcp =>
         balancer ~> tcp ~> merge
       }
-
-      merge ~> Flow[ByteString].buffer(256, OverflowStrategy.backpressure) ~> DubboFlow.decoder
-
+      merge ~> sink
       SinkShape(balancer.in)
     })
   }
 
-  def getSourceByEndpoints(endpoints: Set[Endpoint]) = {
+  def getSourceByEndpoints(endpoints: Set[Endpoint]): SourceQueueWithComplete[(Long, ByteString)] = {
     val handleFlow = Flow[(Long, ByteString)]
       .via(DubboFlow.connectionIdFlow)
-      .buffer(256, OverflowStrategy.backpressure)
       .to(endpointsFlow(endpoints))
     Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
       .to(handleFlow).run()
