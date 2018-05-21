@@ -34,11 +34,16 @@ class Consumer(host:String)(implicit materializer: Materializer) extends Actor w
 class ConnectionHandler(connectionId: Long,
                         connection: ActorRef,
                         requestHandler: ActorRef) extends Actor {
+
   override def receive: Receive = {
     case Received(data) ⇒
       requestHandler ! (connectionId, data)
-    case data: ByteString => connection ! Write(data)
-    case PeerClosed ⇒ context stop self
+    case data: ByteString =>
+      connection ! Write(data)
+   case _: ConnectionClosed ⇒
+      context stop self
+    case PeerClosed ⇒
+      context stop self
   }
 }
 

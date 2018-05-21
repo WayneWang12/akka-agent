@@ -1,7 +1,6 @@
 package mesh.utils
 
 import java.io.{ByteArrayOutputStream, OutputStream, OutputStreamWriter, PrintWriter}
-import java.util.concurrent.atomic.AtomicLong
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Flow, Sink}
@@ -9,6 +8,7 @@ import akka.util.ByteString
 import akka.{Done, NotUsed}
 
 import scala.concurrent.Future
+import scala.util.Try
 
 object DubboFlow {
 
@@ -71,7 +71,7 @@ object DubboFlow {
   val slicer = "parameter=".map(_.toByte)
   val quote = '\"'.toByte
   val quoteAndCarriageReturn = ByteString("\"\r\n")
-  val httpStatus = ByteString("HTTP/1.1 200 OK\r\n")
+  val httpOkStatus = ByteString("HTTP/1.1 200 OK\r\n")
   val kAlive = ByteString("Connection: Keep-Alive\r\n")
   val ctype = ByteString("Content-Type: application/octet-stream\r\n")
   val headerDelimter = ByteString("\r\n")
@@ -84,7 +84,6 @@ object DubboFlow {
     Flow[(Long, ByteString)].map {
       case (cid, bs) =>
         http2DubboByteString(cid, bs)
-
     }
 
    def http2DubboByteString(cid: Long, bs: ByteString): ByteString = {
@@ -97,9 +96,20 @@ object DubboFlow {
   def decoder(implicit actorSystem: ActorSystem): Sink[ByteString, Future[Done]] = Sink.foreach[ByteString] {
     bs =>
         unpackingDubboByteString(bs).foreach { t =>
-          val resp = httpStatus ++ cLength(t._2.size) ++ kAlive ++ ctype ++ headerDelimter ++ t._2
+          val resp = httpOkStatus ++ cLength(t._2.size) ++ kAlive ++ ctype ++ headerDelimter ++ t._2
           val actor = actorSystem.actorSelection(s"/user/consumer-agent/${t._1}")
           actor ! resp
         }
   }
+
+  def responseSink(implicit actorSystem: ActorSystem) = Sink.foreach[(Try[ByteString], Long)] {
+    case (maybeResp, cid) =>
+      val bs = maybeResp.getOrElse(ByteString.empty)
+      val resp = httpOkStatus ++ cLength(bs.size) ++ kAlive ++ ctype ++ headerDelimter ++ bs
+      val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
+      actor ! resp
+
+  }
+
+  val emptyResp: ByteString = httpOkStatus ++headerDelimter ++ ByteString.empty
 }

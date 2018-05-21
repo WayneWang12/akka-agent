@@ -19,9 +19,9 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       endpoint.scale match {
         case ProviderScale.Small =>
-          List.fill(1)(tcp.throttle(40, 50.millis))
+          List.fill(0)(tcp)
         case ProviderScale.Medium =>
-          List.fill(2)(tcp)
+          List.fill(1)(tcp)
         case ProviderScale.Large =>
           List.fill(3)(tcp)
       }
