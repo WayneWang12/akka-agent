@@ -1,9 +1,10 @@
 package mesh.utils
 
 import java.io.{ByteArrayOutputStream, OutputStream, OutputStreamWriter, PrintWriter}
+import java.nio.ByteOrder
 
 import akka.actor.ActorSystem
-import akka.stream.scaladsl.{Flow, Sink}
+import akka.stream.scaladsl.{Flow, Framing, Sink}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 
@@ -60,11 +61,12 @@ object DubboFlow {
   def unpackingDubboByteString(data: ByteString) = {
     def unpacking(data: ByteString, list: List[(Long, ByteString)]): List[(Long, ByteString)] = {
       if (data.size > 16) {
-        val id = Bytes.bytes2long(data.toArray, 4)
+        val id = Bytes.bytes2long(data, 4)
         val string = data.drop(18).takeWhile(_ != '\n')
         unpacking(data.drop(19 + string.length), (id -> string) :: list)
       } else list
     }
+
     unpacking(data, List.empty)
   }
 
@@ -86,20 +88,25 @@ object DubboFlow {
         http2DubboByteString(cid, bs)
     }
 
-   def http2DubboByteString(cid: Long, bs: ByteString): ByteString = {
+  def http2DubboByteString(cid: Long, bs: ByteString): ByteString = {
     val n = bs.indexOfSlice(slicer)
     val s = bs.drop(n + slicer.size)
     val d = quote +: (s ++ quoteAndCarriageReturn)
     map2DubboByteString(cid, d)
   }
 
-  def decoder(implicit actorSystem: ActorSystem): Sink[ByteString, Future[Done]] = Sink.foreach[ByteString] {
-    bs =>
-        unpackingDubboByteString(bs).foreach { t =>
-          val resp = httpOkStatus ++ cLength(t._2.size) ++ kAlive ++ ctype ++ headerDelimter ++ t._2
-          val actor = actorSystem.actorSelection(s"/user/consumer-agent/${t._1}")
-          actor ! resp
-        }
+  def decoder(implicit actorSystem: ActorSystem) = {
+    val flow = Flow[ByteString]
+      .via(Framing.lengthField(4, 12, 1024, ByteOrder.BIG_ENDIAN))
+    val sink = Sink.foreach[ByteString] {
+      bs =>
+        val cid = Bytes.bytes2long(bs, 4)
+        val data = bs.slice(18, bs.size - 1)
+        val resp = httpOkStatus ++ cLength(data.size) ++ kAlive ++ ctype ++ headerDelimter ++ data
+        val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
+        actor ! resp
+    }
+    flow.to(sink)
   }
 
   def responseSink(implicit actorSystem: ActorSystem) = Sink.foreach[(Try[ByteString], Long)] {
@@ -111,5 +118,5 @@ object DubboFlow {
 
   }
 
-  val emptyResp: ByteString = httpOkStatus ++headerDelimter ++ ByteString.empty
+  val emptyResp: ByteString = httpOkStatus ++ headerDelimter ++ ByteString.empty
 }

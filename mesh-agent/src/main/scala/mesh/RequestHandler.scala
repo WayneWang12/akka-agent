@@ -6,8 +6,6 @@ import akka.stream.scaladsl.{Balance, Flow, GraphDSL, Merge, Sink, Source, Sourc
 import akka.util.ByteString
 import mesh.utils.DubboFlow
 
-import scala.concurrent.duration._
-
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
@@ -19,9 +17,9 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port).async
       endpoint.scale match {
         case ProviderScale.Small =>
-          List.fill(0)(tcp)
-        case ProviderScale.Medium =>
           List.fill(1)(tcp)
+        case ProviderScale.Medium =>
+          List.fill(2)(tcp)
         case ProviderScale.Large =>
           List.fill(3)(tcp)
       }
