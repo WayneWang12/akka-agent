@@ -3,7 +3,7 @@ package mesh
 import java.util.NoSuchElementException
 
 import akka.actor.{ActorSystem, Props}
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, ActorMaterializerSettings, IOSettings}
 import com.typesafe.config.ConfigFactory
 
 object Server extends App {
@@ -14,7 +14,14 @@ object Server extends App {
   val serverPort = config.getInt("server.port")
 
   implicit val actorSystem: ActorSystem = ActorSystem("dubbo-mesh")
-  implicit val materializer: ActorMaterializer = ActorMaterializer()
+  implicit val materializer: ActorMaterializer = ActorMaterializer(
+    Some(
+      ActorMaterializerSettings(actorSystem)
+        .withIOSettings(
+          IOSettings.apply(actorSystem).withTcpWriteBufferSize(Int.MaxValue)
+        )
+    )
+  )
 
   val hostIp = IpHelper.getHostIp
 

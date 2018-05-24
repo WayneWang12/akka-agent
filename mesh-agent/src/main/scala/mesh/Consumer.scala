@@ -26,7 +26,10 @@ class Consumer(host:String)(implicit materializer: Materializer) extends Actor w
     case Connected(_, _) ⇒
       val cid = connectionId.getAndIncrement()
       val connection = sender()
-      val handler = context.actorOf(Props(classOf[ConnectionHandler], cid, connection, requestHandler), cid.toString)
+      val handler = context.actorOf(
+        Props(classOf[ConnectionHandler], cid, connection, requestHandler),
+        cid.toString
+      )
       connection ! Register(handler)
   }
 }

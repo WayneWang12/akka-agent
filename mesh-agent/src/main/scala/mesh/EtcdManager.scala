@@ -26,6 +26,11 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
 
   var endpoints = Set.empty[Endpoint]
 
+  import scala.concurrent.duration._
+  import context.dispatcher
+
+  context.system.scheduler.scheduleOnce(60.second, self, "consumer")
+
   override def receive: Receive = {
     case "consumer" =>
       val found = find(serviceName)
