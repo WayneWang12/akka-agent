@@ -8,6 +8,8 @@ import akka.stream.scaladsl.{Balance, Flow, Framing, GraphDSL, Merge, Sink, Sour
 import akka.util.ByteString
 import mesh.utils.DubboFlow
 
+import scala.concurrent.Future
+
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
@@ -30,24 +32,22 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
           List.fill(3)(tcp)
       }
     }
-    Sink.fromGraph(GraphDSL.create() { implicit builder =>
+    Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
       val balancer = builder.add(Balance[ByteString](tcpFlows.size))
       val merge = builder.add(Merge[ByteString](tcpFlows.size))
-      val sink = DubboFlow.decoder
       tcpFlows.foreach { tcp =>
         balancer ~> tcp.async ~> merge
       }
-      merge ~> sink
-      SinkShape(balancer.in)
+      FlowShape(balancer.in, merge.out)
     })
   }
 
   def getSourceByEndpoints(endpoints: Set[Endpoint]): SourceQueueWithComplete[(Long, ByteString)] = {
     val handleFlow = Flow[(Long, ByteString)]
       .via(DubboFlow.connectionIdFlow)
-      .buffer(256, OverflowStrategy.backpressure)
-      .to(endpointsFlow(endpoints))
+      .via(endpointsFlow(endpoints))
+      .to(DubboFlow.decoder)
     Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
       .to(handleFlow).run()
   }
@@ -56,6 +56,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
   override def receive: Receive = {
     case (cid: Long, bs: ByteString) =>
+      Future.successful("").flatMap()
       source.offer(cid -> bs)
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")

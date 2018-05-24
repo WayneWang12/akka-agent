@@ -68,8 +68,7 @@ object DubboFlow {
   val headers = HttpOkStatus ++ KeepAlive ++ ContentType
 
   def decoder(implicit actorSystem: ActorSystem, executionContext: ExecutionContext) = {
-    val flow = Flow[ByteString]
-    val sink = Sink.foreachParallel[ByteString](8) {
+    Sink.foreachParallel[ByteString](8) {
       bs =>
         val cid = Bytes.bytes2long(bs, 4)
         val data = bs.slice(18, bs.size - 1)
@@ -77,6 +76,5 @@ object DubboFlow {
         val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
         actor ! resp
     }
-    flow.to(sink)
   }
 }
