@@ -4,37 +4,46 @@ import java.nio.ByteOrder
 
 import akka.actor.{Actor, ActorLogging}
 import akka.stream._
-import akka.stream.scaladsl.{Balance, Flow, Framing, GraphDSL, Merge, Sink, Source, SourceQueueWithComplete, Tcp}
+import akka.stream.scaladsl.{Balance, Flow, Framing, GraphDSL, Merge, Partition, Source, SourceQueueWithComplete, Tcp}
 import akka.util.ByteString
 import mesh.utils.DubboFlow
 
-import scala.concurrent.Future
-
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
-  import context.system
-  import context.dispatcher
+  import context.{dispatcher, system}
 
   context.system.eventStream.subscribe(self, classOf[EndpointsUpdate])
 
   def endpointsFlow(endpoints: Set[Endpoint]) = {
-    val tcpFlows = endpoints.toList.flatMap { endpoint =>
-      val tcp = Tcp().outgoingConnection(endpoint.host, endpoint.port)
-        .via(Framing
-          .lengthField(4, 12, 64 * 1024, ByteOrder.BIG_ENDIAN)
-        )
+    val tcpFlows = endpoints.toList.sortBy(_.scale).flatMap { endpoint =>
+      val tcp = Flow[ByteString].buffer(20, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(endpoint.host, endpoint.port))
       endpoint.scale match {
         case ProviderScale.Small =>
           List.fill(1)(tcp)
         case ProviderScale.Medium =>
-          List.fill(2)(tcp)
+          List.fill(1)(tcp)
         case ProviderScale.Large =>
-          List.fill(3)(tcp)
+          List.fill(1)(tcp)
       }
     }
+
+    def proportional[T]:T => Int = {
+      var i = -1
+      t => {
+        i += 1
+        if(i == 0) i
+        else if(i <= 4) 1
+        else if(i <= 8) 2
+        else {
+          i = -1
+          2
+        }
+      }
+    }
+
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
-      val balancer = builder.add(Balance[ByteString](tcpFlows.size))
+      val balancer = builder.add(Partition[ByteString](tcpFlows.size, proportional))
       val merge = builder.add(Merge[ByteString](tcpFlows.size))
       tcpFlows.foreach { tcp =>
         balancer ~> tcp.async ~> merge
@@ -47,6 +56,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
     val handleFlow = Flow[(Long, ByteString)]
       .via(DubboFlow.connectionIdFlow)
       .via(endpointsFlow(endpoints))
+      .via(Framing.lengthField(4, 12, 64 * 1024, ByteOrder.BIG_ENDIAN))
       .to(DubboFlow.decoder)
     Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
       .to(handleFlow).run()
@@ -56,7 +66,6 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
   override def receive: Receive = {
     case (cid: Long, bs: ByteString) =>
-      Future.successful("").flatMap()
       source.offer(cid -> bs)
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")
