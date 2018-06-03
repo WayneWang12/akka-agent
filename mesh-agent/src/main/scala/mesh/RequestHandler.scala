@@ -2,6 +2,7 @@ package mesh
 
 import java.nio.ByteOrder
 
+import akka.NotUsed
 import akka.actor.{Actor, ActorLogging}
 import akka.stream._
 import akka.stream.scaladsl.{Balance, Flow, Framing, GraphDSL, Merge, Partition, Source, SourceQueueWithComplete, Tcp}
@@ -14,39 +15,39 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
   context.system.eventStream.subscribe(self, classOf[EndpointsUpdate])
 
-  def endpointsFlow(endpoints: Set[Endpoint]) = {
-    val tcpFlows = endpoints.toList.sortBy(_.scale).map { endpoint =>
-      val tcp = Flow[ByteString].buffer(20, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(endpoint.host, endpoint.port))
-      tcp
-    }
-
-    def proportional[T]: T => Int = {
-      var i = -1
-      _ => {
-        i += 1
-        if (i == 0) i
-        else if (i <= 8) {
-          if (i % 2 == 0) 1
-          else 2
-        }
-        else {
-          i = -1
-          2
-        }
-      }
-    }
-
-    val framing = Framing.lengthField(4, 12, Int.MaxValue, ByteOrder.BIG_ENDIAN)
-
+  def proportionalEndpoints(endpoints: List[(Endpoint, Int)]): Flow[ByteString, ByteString, NotUsed] = {
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
-      val balancer = builder.add(Partition[ByteString](tcpFlows.size, proportional))
-      val merge = builder.add(Merge[ByteString](tcpFlows.size))
-      tcpFlows.foreach { tcp =>
-        balancer ~> tcp.async ~> framing.async ~> merge
+      val sum = endpoints.map(_._2).sum
+      val merge = builder.add(Merge[ByteString](endpoints.size))
+      val balancer = builder.add(Balance[ByteString](sum))
+
+      val framing = Framing.lengthField(4, 12, Int.MaxValue, ByteOrder.BIG_ENDIAN)
+
+      endpoints.foreach {
+        case (ed, num) =>
+          val tcp = Flow[ByteString].buffer(100, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(ed.host, ed.port))
+          val flows = List.fill(num)(Flow[ByteString])
+          val m = builder.add(Merge[ByteString](num))
+          flows.foreach(f => balancer ~> f ~> m)
+          m ~> tcp ~> framing ~> merge
       }
       FlowShape(balancer.in, merge.out)
     })
+  }
+
+  def endpointsFlow(endpoints: Set[Endpoint]) = {
+    val tcpFlows = endpoints.toList.map { endpoint =>
+      endpoint.scale match {
+        case ProviderScale.Small =>
+          (endpoint, 1)
+        case ProviderScale.Medium =>
+          (endpoint, 4)
+        case ProviderScale.Large =>
+          (endpoint, 5)
+      }
+    }
+    proportionalEndpoints(tcpFlows)
   }
 
   def getSourceByEndpoints(endpoints: Set[Endpoint]): SourceQueueWithComplete[(Long, ByteString)] = {

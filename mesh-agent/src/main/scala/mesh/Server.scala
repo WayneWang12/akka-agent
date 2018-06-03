@@ -18,22 +18,21 @@ object Server extends App {
 
   val etcdHost = config.getString("etcd.url")
 
-  val etcdManager = actorSystem.actorOf(Props(
-    new EtcdManager(etcdHost, serverPort)
-  ))
-
+  val etcdHandler = new EtcdHandler(etcdHost)
 
   serviceType match {
     case "consumer" =>
-      actorSystem.actorOf(Props(new Consumer(hostIp)), "consumer-agent")
-      Thread.sleep(1000) //one second for etcd client to start.
-      etcdManager ! serviceType
+      val etcdManager = actorSystem.actorOf(Props(
+        new EtcdManager(etcdHandler, serverPort)
+      ))
+      actorSystem.actorOf(Props(new Consumer(hostIp, etcdManager)), "consumer-agent")
     case "provider" =>
       val dubboPort = config.getInt("dubbo.protocol.port")
       val scale = config.getString("scale")
-      val provider = new Provider(hostIp, serverPort, dubboPort)
-      Thread.sleep(1000) //one second for etcd client to start.
-      etcdManager ! (serviceType, ProviderScale.withName(scale))
+      val providerScale = ProviderScale.withName(scale)
+      etcdHandler.register(etcdHandler.serviceName, serverPort, providerScale)
+      etcdHandler.keepAlive()
+      val provider = new Provider(hostIp, serverPort, dubboPort, providerScale)
       provider.startService
   }
 

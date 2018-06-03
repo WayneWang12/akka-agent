@@ -9,7 +9,7 @@ import akka.io.{IO, Tcp}
 import akka.stream.Materializer
 import akka.util.ByteString
 
-class Consumer(host:String)(implicit materializer: Materializer) extends Actor with ActorLogging {
+class Consumer(host:String, etcdManager: ActorRef)(implicit materializer: Materializer) extends Actor with ActorLogging {
 
   import context.system
 
@@ -20,6 +20,7 @@ class Consumer(host:String)(implicit materializer: Materializer) extends Actor w
 
   def receive: Receive = {
     case Bound(localAddress) ⇒
+      etcdManager ! "consumer"
       log.info(s"service started at ${localAddress.getHostString}:${localAddress.getPort}")
     case CommandFailed(_: Bind) ⇒
       context stop self

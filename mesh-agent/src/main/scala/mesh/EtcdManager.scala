@@ -3,14 +3,17 @@ package mesh
 import java.net.InetAddress
 import java.text.MessageFormat
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{Actor, ActorLogging, ActorSystem}
+import akka.event.Logging
 import com.coreos.jetcd.Client
 import com.coreos.jetcd.data.ByteSequence
 import com.coreos.jetcd.kv.GetResponse
 import com.coreos.jetcd.options.{GetOption, PutOption}
 import mesh.ProviderScale.ProviderScale
 
-class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogging {
+class EtcdHandler(etcdUrl: String)(implicit actorSystem: ActorSystem) {
+
+  private val log = Logging(actorSystem, this.getClass)
 
   log.info(s"get etcd uri $etcdUrl")
 
@@ -18,34 +21,16 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
 
   val kvClient = client.getKVClient
   val lease = client.getLeaseClient
-
   var leaseId: Long = _
 
-  private val rootPath = "dubbomesh"
-  private val serviceName = "com.alibaba.dubbo.performance.demo.provider.IHelloService"
+  val rootPath = "dubbomesh"
+  val serviceName = "com.alibaba.dubbo.performance.demo.provider.IHelloService"
 
-  var endpoints = Set.empty[Endpoint]
-
-  override def receive: Receive = {
-    case "consumer" =>
-      val found = find(serviceName)
-      if (found != endpoints) {
-        endpoints = found
-        log.info(s"found new endpoints $found")
-        context.system.eventStream.publish(EndpointsUpdate(endpoints))
-        client.close()
-        context stop self
-      }
-    case ("provider", scale:ProviderScale) =>
-      try {
-        val id = lease.grant(30).get.getID
-        leaseId = id
-      } catch {
-        case e:Throwable => e.printStackTrace()
-      }
-
-      keepAlive()
-      register(serviceName, serverPort, scale)
+  try {
+    val id = lease.grant(30).get.getID
+    leaseId = id
+  } catch {
+    case e: Throwable => e.printStackTrace()
   }
 
   def keepAlive(): Unit = {
@@ -59,8 +44,7 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
     }
   }
 
-
-  def register(serviceName: String, port: Int, scale:ProviderScale): Unit = { // 服务注册的key为:    /dubbomesh/com.some.package.IHelloService/192.168.100.100:2000
+  def register(serviceName: String, port: Int, scale: ProviderScale): Unit = { // 服务注册的key为:    /dubbomesh/com.some.package.IHelloService/192.168.100.100:2000
     val strKey = MessageFormat.format("/{0}/{1}/{2}:{3}", rootPath, serviceName, IpHelper.getHostIp, String.valueOf(port))
 
     val key = ByteSequence.fromString(strKey)
@@ -87,6 +71,27 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
     ed.toSet
   }
 
+
+}
+
+class EtcdManager(etcdHandler: EtcdHandler, serverPort: Int) extends Actor with ActorLogging {
+
+  import etcdHandler._
+
+  var endpoints = Set.empty[Endpoint]
+
+  override def receive: Receive = {
+    case "consumer" =>
+      val found = find(serviceName)
+      if (found != endpoints) {
+        endpoints = found
+        log.info(s"found new endpoints $found")
+        context.system.eventStream.publish(EndpointsUpdate(endpoints))
+        client.close()
+        context stop self
+      }
+  }
+
 }
 
 object ProviderScale extends Enumeration {
@@ -94,7 +99,7 @@ object ProviderScale extends Enumeration {
   val Small, Medium, Large = Value
 }
 
-case class Endpoint(host: String, port: Int, scale:ProviderScale)
+case class Endpoint(host: String, port: Int, scale: ProviderScale)
 
 case class EndpointsUpdate(endpoints: Set[Endpoint])
 
