@@ -48,9 +48,6 @@ class EtcdManager(etcdUrl: String, serverPort: Int) extends Actor with ActorLogg
       register(serviceName, serverPort, scale)
   }
 
-  // 该EtcdRegistry没有使用etcd的Watch机制来监听etcd的事件
-  // 添加watch，在本地内存缓存地址列表，可减少网络调用的次数
-  // 使用的是简单的随机负载均衡，如果provider性能不一致，随机策略会影响性能
   def keepAlive(): Unit = {
     try {
       val listener = lease.keepAlive(leaseId)
