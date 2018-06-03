@@ -6,6 +6,7 @@ import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.{Flow, Sink}
 import akka.util.ByteString
 
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
 object DubboFlow {
@@ -36,7 +37,7 @@ object DubboFlow {
     Bytes.short2bytes(MAGIC, array)
     array(2) = (FLAG_REQUEST | 6).toByte
     array(2) = (array(2) | FLAG_TWOWAY).toByte
-    ByteString(array)
+    ByteString.fromArrayUnsafe(array)
   }
 
   def map2DubboByteString(requestId: Long, parameter: ByteString): ByteString = {
@@ -44,7 +45,7 @@ object DubboFlow {
     Bytes.long2bytes(requestId, idAndLength, 0)
     val data = dubboVersion ++ interface ++ version ++ method ++ pType ++ parameter ++ dubboEnd
     Bytes.int2bytes(data.size, idAndLength, 8)
-    dubboHeader ++ ByteString(idAndLength) ++ data
+    dubboHeader ++ ByteString.fromArrayUnsafe(idAndLength) ++ data
   }
 
 
@@ -69,13 +70,14 @@ object DubboFlow {
   val headers = HttpOkStatus ++ KeepAlive ++ ContentType
 
   def decoder(implicit actorSystem: ActorSystem) = {
-      Sink.foreach[ByteString]{
-        bs =>
-          val cid = Bytes.bytes2long(bs, 4)
-          val data = bs.slice(18, bs.size - 1)
-          val resp = headers ++ cLength(data.size) ++ HeaderDelimter ++ data
-          val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
-          actor ! resp
-      }
+    Sink.foreach[ByteString] {
+      val map = mutable.Map.empty[Int, ByteString]
+      bs =>
+        val cid = Bytes.bytes2long(bs, 4)
+        val data = bs.slice(18, bs.size - 1)
+        val resp = headers ++ map.getOrElseUpdate(data.size, cLength(data.size)) ++ HeaderDelimter ++ data
+        val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
+        actor ! resp
+    }
   }
 }
