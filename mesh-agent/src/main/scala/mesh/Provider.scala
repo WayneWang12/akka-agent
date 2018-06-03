@@ -1,6 +1,7 @@
 package mesh
 
 import io.netty.bootstrap.ServerBootstrap
+import io.netty.buffer.PooledByteBufAllocator
 import io.netty.channel.epoll.{EpollEventLoopGroup, EpollServerSocketChannel}
 import io.netty.channel.{ChannelOption, EventLoopGroup}
 import io.netty.handler.logging.{LogLevel, LoggingHandler}
@@ -18,6 +19,7 @@ class Provider(localhost: String, port: Int, dubboPort: Int) {
       val b = new ServerBootstrap()
       val c = b.group(bossGroup, workerGroup).channel(classOf[EpollServerSocketChannel])
         .childHandler(new DubboInitializer(localhost, dubboPort))
+        .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
         .childOption(ChannelOption.AUTO_READ, java.lang.Boolean.FALSE)
         .bind(localhost, port)
         .sync()

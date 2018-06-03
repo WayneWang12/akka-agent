@@ -14,7 +14,7 @@ class DubboFrontend(val remoteHost: String, val remotePort: Int) extends Channel
     // Start the connection attempt.
     val b = new Bootstrap()
     b.group(inboundChannel.eventLoop).channel(ctx.channel.getClass)
-      .handler(new DubboBakcend(inboundChannel))
+      .handler(new DubboBackend(inboundChannel))
       .option(ChannelOption.AUTO_READ, java.lang.Boolean.FALSE)
     val f = b.connect(remoteHost, remotePort)
     outboundChannel = f.channel

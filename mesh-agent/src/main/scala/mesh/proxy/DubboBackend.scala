@@ -2,7 +2,7 @@ package mesh.proxy
 
 import io.netty.channel.{Channel, ChannelFuture, ChannelHandlerContext, ChannelInboundHandlerAdapter}
 
-class DubboBakcend(val inboundChannel: Channel) extends ChannelInboundHandlerAdapter {
+class DubboBackend(val inboundChannel: Channel) extends ChannelInboundHandlerAdapter {
   override def channelActive(ctx: ChannelHandlerContext): Unit = {
     ctx.read
   }
