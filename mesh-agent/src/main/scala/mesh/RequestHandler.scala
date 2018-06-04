@@ -19,18 +19,16 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
       val sum = endpoints.map(_._2).sum
-      val merge = builder.add(Merge[ByteString](endpoints.size))
+      val merge = builder.add(Merge[ByteString](sum))
       val balancer = builder.add(Balance[ByteString](sum))
 
       val framing = Framing.lengthField(4, 12, Int.MaxValue, ByteOrder.BIG_ENDIAN)
 
       endpoints.foreach {
         case (ed, num) =>
-          val tcp = Flow[ByteString].buffer(100, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(ed.host, ed.port))
-          val flows = List.fill(num)(Flow[ByteString])
-          val m = builder.add(Merge[ByteString](num))
-          flows.foreach(f => balancer ~> f ~> m)
-          m ~> tcp ~> framing ~> merge
+          val tcp = Tcp().outgoingConnection(ed.host, ed.port)
+          val flows = List.fill(num)(tcp)
+          flows.foreach(f => balancer ~> f.async ~> framing.async ~> merge)
       }
       FlowShape(balancer.in, merge.out)
     })
@@ -40,14 +38,15 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
     val tcpFlows = endpoints.toList.map { endpoint =>
       endpoint.scale match {
         case ProviderScale.Small =>
-          (endpoint, 1)
+          (endpoint, 0)
         case ProviderScale.Medium =>
-          (endpoint, 4)
+          (endpoint, 1)
         case ProviderScale.Large =>
-          (endpoint, 5)
+          (endpoint, 1)
       }
     }
-    proportionalEndpoints(tcpFlows)
+
+    proportionalEndpoints(tcpFlows.filter(_._2 > 0))
   }
 
   def getSourceByEndpoints(endpoints: Set[Endpoint]): SourceQueueWithComplete[(Long, ByteString)] = {
