@@ -2,6 +2,7 @@ package mesh.utils
 
 import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.io.Tcp.Write
 import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.{Flow, Sink}
 import akka.util.ByteString
@@ -76,8 +77,8 @@ object DubboFlow {
         val cid = Bytes.bytes2long(bs, 4)
         val data = bs.slice(18, bs.size - 1)
         val resp = headers ++ map.getOrElseUpdate(data.size, cLength(data.size)) ++ HeaderDelimter ++ data
-        val actor = actorSystem.actorSelection(s"/user/consumer-agent/$cid")
-        actor ! resp
+        val actor = actorSystem.actorSelection(s"/system/IO-TCP/selectors/$$a/$cid")
+        actor ! Write(resp)
     }
   }
 }

@@ -4,6 +4,7 @@ import java.nio.ByteOrder
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging}
+import akka.io.Tcp.Received
 import akka.stream._
 import akka.stream.scaladsl.{Flow, Framing, GraphDSL, Merge, Partition, Source, SourceQueueWithComplete, Tcp}
 import akka.util.ByteString
@@ -71,8 +72,8 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
   var source: SourceQueueWithComplete[(Long, ByteString)] = _
 
   override def receive: Receive = {
-    case (cid: Long, bs: ByteString) =>
-      source.offer(cid -> bs)
+    case Received(bs) =>
+      source.offer(sender().path.name.toLong, bs)
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")
       source = getSourceByEndpoints(newEndpoints)
