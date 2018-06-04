@@ -38,7 +38,9 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
 
       endpoints.foreach {
         case (ed, _) =>
-          val tcp = Flow[ByteString].buffer(200, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(ed.host, ed.port))
+          val tcp = Flow[ByteString]
+            .buffer(200, OverflowStrategy.backpressure)
+            .via(Tcp().outgoingConnection(ed.host, ed.port))
           balancer ~> tcp.async ~> framing.async ~> merge
       }
       FlowShape(balancer.in, merge.out)
@@ -51,9 +53,9 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
         case ProviderScale.Small =>
           (endpoint, 1)
         case ProviderScale.Medium =>
-          (endpoint, 3)
+          (endpoint, 2)
         case ProviderScale.Large =>
-          (endpoint, 6)
+          (endpoint, 8)
       }
     }
 
@@ -65,7 +67,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       .via(DubboFlow.connectionIdFlow)
       .via(endpointsFlow(endpoints))
       .to(DubboFlow.decoder)
-    Source.queue[(Long, ByteString)](256, OverflowStrategy.backpressure)
+    Source.queue[(Long, ByteString)](512, OverflowStrategy.backpressure)
       .to(handleFlow).run()
   }
 
@@ -77,5 +79,6 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")
       source = getSourceByEndpoints(newEndpoints)
+    case _ =>
   }
 }

@@ -13,7 +13,7 @@ class Consumer(host:String, etcdManager: ActorRef)(implicit materializer: Materi
 
   IO(Tcp) ! Bind(self, new InetSocketAddress("127.0.0.1", 20000))
 
-  val requestHandler: ActorRef = context.actorOf(Props(new RequestHandler), "request-handler")
+  val requestHandler: ActorRef = context.actorOf(Props(new RequestHandler).withDispatcher("mpsc"), "request-handler")
 
   def receive: Receive = {
     case Bound(localAddress) ⇒
