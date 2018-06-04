@@ -5,9 +5,11 @@ import java.nio.ByteOrder
 import akka.NotUsed
 import akka.actor.{Actor, ActorLogging}
 import akka.stream._
-import akka.stream.scaladsl.{Balance, Flow, Framing, GraphDSL, Merge, Partition, Source, SourceQueueWithComplete, Tcp}
+import akka.stream.scaladsl.{Flow, Framing, GraphDSL, Merge, Partition, Source, SourceQueueWithComplete, Tcp}
 import akka.util.ByteString
 import mesh.utils.DubboFlow
+
+import scala.util.Random
 
 class RequestHandler(implicit materializer: Materializer) extends Actor with ActorLogging {
 
@@ -18,17 +20,25 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
   def proportionalEndpoints(endpoints: List[(Endpoint, Int)]): Flow[ByteString, ByteString, NotUsed] = {
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
       import GraphDSL.Implicits._
-      val sum = endpoints.map(_._2).sum
+      val sum = endpoints.size
+
+      val list = endpoints.map(_._2)
+      val listUpperBound = list.sum
+      val ranges = list.scanLeft(0)(_ + _).sliding(2, 1).toList.map(t => (t.head, t(1)))
+      val routeStrategy = (bs: ByteString) => {
+        val x = Random.nextInt(listUpperBound)
+        ranges.indexWhere(t => x >= t._1 && x < t._2)
+      }
+
       val merge = builder.add(Merge[ByteString](sum))
-      val balancer = builder.add(Balance[ByteString](sum))
+      val balancer = builder.add(Partition[ByteString](sum, routeStrategy))
 
       val framing = Framing.lengthField(4, 12, Int.MaxValue, ByteOrder.BIG_ENDIAN)
 
       endpoints.foreach {
-        case (ed, num) =>
-          val tcp = Tcp().outgoingConnection(ed.host, ed.port)
-          val flows = List.fill(num)(tcp)
-          flows.foreach(f => balancer ~> f.async ~> framing.async ~> merge)
+        case (ed, _) =>
+          val tcp = Flow[ByteString].buffer(200, OverflowStrategy.backpressure).via(Tcp().outgoingConnection(ed.host, ed.port))
+          balancer ~> tcp.async ~> framing.async ~> merge
       }
       FlowShape(balancer.in, merge.out)
     })
@@ -38,11 +48,11 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
     val tcpFlows = endpoints.toList.map { endpoint =>
       endpoint.scale match {
         case ProviderScale.Small =>
-          (endpoint, 0)
+          (endpoint, 1)
         case ProviderScale.Medium =>
-          (endpoint, 1)
+          (endpoint, 3)
         case ProviderScale.Large =>
-          (endpoint, 1)
+          (endpoint, 6)
       }
     }
 

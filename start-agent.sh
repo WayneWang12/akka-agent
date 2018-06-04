@@ -12,7 +12,6 @@ if [[ "$1" == "consumer" ]]; then
        -Xms1536M \
        -Xmx1536M \
        -Dtype=consumer \
-       -Dcustomer.factor=0.5 \
        -Dserver.port=20000 \
        -Detcd.url=$ETCD_URL \
        -Dlogs.dir=/root/logs \
@@ -23,7 +22,7 @@ elif [[ "$1" == "provider-small" ]]; then
        -Xms512M \
        -Xmx512M \
        -Dtype=provider \
-       -Dfactor=0.125 \
+       -Dfactor=0.5 \
        -Dscale=Small \
        -Ddubbo.protocol.port=20880 \
        -Dserver.port=30000 \
@@ -36,7 +35,7 @@ elif [[ "$1" == "provider-medium" ]]; then
        -Xms1536M \
        -Xmx1536M \
        -Dtype=provider \
-       -Dfactor=0.25 \
+       -Dfactor=0.5 \
        -Dscale=Medium \
        -Ddubbo.protocol.port=20880 \
        -Dserver.port=30000 \
@@ -49,7 +48,7 @@ elif [[ "$1" == "provider-large" ]]; then
        -Xms2560M \
        -Xmx2560M \
        -Dtype=provider \
-       -Dfactor=0.25 \
+       -Dfactor=0.5 \
        -Dscale=Large \
        -Ddubbo.protocol.port=20880 \
        -Dserver.port=30000 \
