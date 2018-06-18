@@ -78,6 +78,7 @@ class RequestHandler(implicit materializer: Materializer) extends Actor with Act
       source.offer(sender().path.name.toLong, bs)
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")
+      source.complete()
       source = getSourceByEndpoints(newEndpoints)
     case _ =>
   }
