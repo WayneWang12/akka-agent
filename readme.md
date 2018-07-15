@@ -40,7 +40,7 @@
 
 下面一段是用来抽象Consumer的Actor里面的代码，所有连接的请求都被注册到RequestHandler这个Actor了。
 
-```
+```scala
   val requestHandler: ActorRef = context.actorOf(Props(new RequestHandler).withDispatcher("mpsc"), "request-handler")
 
   def receive: Receive = {
@@ -59,7 +59,7 @@
 
 然后在`Requesthandler`里面，接收到的`ByteString`直接作为元素提供给后面的处理流代码里面。
 
-```
+```scala
   var source: SourceQueueWithComplete[(Long, ByteString)] = _
   
   override def receive: Receive = {
@@ -80,7 +80,7 @@
 
 我们这里是一个可完成`Source`，它由`Source.queue`声明并物化后产生：
 
-```
+```scala
   def getSourceByEndpoints(endpoints: Set[Endpoint]): SourceQueueWithComplete[(Long, ByteString)] = {
     val handleFlow = Flow[(Long, ByteString)]
       .via(DubboFlow.connectionIdFlow)
@@ -96,7 +96,7 @@
 
 上面的内容里面，`DubboFlow.connectionIdFlow`和`DubboFlow.decoder`不多说，都是打铁代码。核心逻辑`endpointsFlow(endPoints)`贴出如下：
 
-```
+```scala
   def endpointsFlow(endpoints: List[Endpoint]) = {
     
     val tcpFlows = endpoints.map { endpoint =>
@@ -142,7 +142,7 @@
 
 由上面的拓扑结构可以看到，当任意Provider向上游表示可以处理请求的时候，Balancer就会在有请求到来的时候，向其输出；Provider处理完的请求，经过TCP拆包过程之后，就合并到一起，交由下游的流继续处理。如此，只要连接有请求过来，那么整个流就能一直运转。这个过程中，即使某个通往provider的连接断掉了，Balancer也能继续将请求路由到其他两个连接上。而这个时候，负责服务发现的Actor就会发出`EndpointsUpdated`的消息，此时`RequestHandler`会进入第二个匹配，用新的Endpoint来更新我们的处理流：
 
-```
+```scala
     case EndpointsUpdate(newEndpoints) =>
       log.info(s"start new source for endpoints $newEndpoints")
       source.complete()
@@ -153,7 +153,7 @@
 
 Provider的代码相对Consumer就简单很多：
 
-```
+```scala
   val handleFlow = Tcp().outgoingConnection(host, dubboPort).async
 
   def startService: Future[Done] = {
@@ -167,9 +167,132 @@ Provider的代码相对Consumer就简单很多：
 
 到这里，我们用了大约不到300行代码，就完成了初赛题目的所有要求。并且代码的普适性和健壮性都很不错，后续还能依据需求，快速地实现任意一端的限流要求(`Flow[Request].throttle(...)`)，或者加入断路器，进行快速失败。
 
+这套代码在CPU资源充足的时候，例如在我本地(注意，已经按照docker参数限定了CPU quota和内存)，256连接的时候可以跑4960, 512的时候可以跑9500。
+
+然而线上则表现不好，分别最多4500和6400。这是为什么呢？
+
+经过查询源码以后发现，问题出现在这一段：
+
+```scala
+@tailrec def innerRead(buffer: ByteBuffer, remainingLimit: Int): ReadResult =
+        if (remainingLimit > 0) {
+          // never read more than the configured limit
+          buffer.clear()
+          val maxBufferSpace = math.min(DirectBufferSize, remainingLimit)
+          buffer.limit(maxBufferSpace)
+          val readBytes = channel.read(buffer)
+          buffer.flip()
+
+          if (TraceLogging) log.debug("Read [{}] bytes.", readBytes)
+          if (readBytes > 0) info.handler ! Received(ByteString(buffer)) //这一段
+
+          readBytes match {
+            case `maxBufferSpace` ⇒ if (pullMode) MoreDataWaiting else innerRead(buffer, remainingLimit - maxBufferSpace)
+            case x if x >= 0      ⇒ AllRead
+            case -1               ⇒ EndOfStream
+            case _ ⇒
+              throw new IllegalStateException("Unexpected value returned from read: " + readBytes)
+          }
+        } else MoreDataWaiting
+```
+
+其中`info.handler ! Received(ByteString(buffer))`是将`SocketChannel`接收到的数据复制成`ByteString`类型之后，再发送出去的，所以相当于是从堆外把数据复制了出去，于是导致整个流程都是非zero copy的。本来在正常的逻辑下，不ZC是必然的，因为肯定要把数据读出来进行处理。但是在本次比赛的场景里，这种复制就是非常昂贵的操作了，直接导致Akka版本的代码无法和各位竞争，即使代码再精简，思想再先进，也无法取得好的成绩。所以在第二个版本中，我换用了netty来跑分。
+
+Netty版本下的核心代码，分ConsumerAgent和调用PrivderAgent的NettyClient列出如下：
+
+ConsumerAgent:
+```scala
+  override def channelRead(ctx: ChannelHandlerContext, msg: scala.Any): Unit = {
+    msg match {
+      case in: ByteBuf =>
+        val meshRequest = MeshRequest(cid) //cid是connectionId,在连接建立的时候获取
+        val maybeClient = ClientChannelHolder.clientChannelCache.get() //client的channel存在了ThreadLocal里面，直接通过ThreadLocal获取到channelHandler
+        maybeClient.writeAndFlush(meshRequest.toCustomProtocol(in), maybeClient.voidPromise()) //将流入的bytebuffer转变成自定义协议的格式，并直接向client的channel刷入数据
+        meshRequest.recycle //回收MeshRequest对象
+    }
+  }
+ 
+```
+
+NettyClient:
+```scala
+override def channelRead(ctx: ChannelHandlerContext, msg: scala.Any): Unit = {
+          msg match {
+            case bs: ByteBuf =>
+              val cid = bs.getLong(4) //从ByteBuffer中获取connectionId
+              val resp = MeshResponse(cid) //包装成MeshResponse
+              val ch = ServerChannelHolder.serverChannelMap.get().get(cid) //根据connectionId获取这个连接的SocketChannel
+              if(ch != null) { //如果存在的话，则刷入响应
+                ch.writeAndFlush(resp.toHttpResponse(bs), ch.voidPromise())
+              }
+              resp.recycle //回收MeshResponse对象
+          }
+        }
+```
+
+这个是我所发现的最短的路线。其中省略了路由的过程。整体的线程设置如下：
+
+```scala
+  val acceptorGroup = new EpollEventLoopGroup(1)
+  val threadFactory = new DefaultThreadFactory("atf_wrk")
+  val workerNumber = 3
+  val workerGroup = new EpollEventLoopGroup(workerNumber, threadFactory)
+```
+一个负责IO的线程，三个负责处理请求的线程。三个NettyClient分别使用三个worker中的一个就好了：
+
+```scala
+  val eventLoop = workerGroup.next()
+  new NettyClient(ed.host, ed.port, eventLoop, 1, ed.scale)
+```
+
+主要的trick就是我只起了4个线程，1个负责IO，3个负责请求处理。通过连接绑定的线程来进行路由，所以少了很多人加权轮询的步骤，而且每个连接只通过同一个线程进行流转，所以也少了context switch的过程。情况好的话，4个线程应该pin到它们的cpu上，没有任何的上下文切换。
+
+至于其他就是一些打铁的小细节，比如使用Recycler生成对象池来回收对象，使用池化的ByteBuf来避免堆外内存分配的开销，预先定义好一些要用来包装请求和回复的对象，使用`Unpooled.unreleasableBuffer(buffer)`来反复利用。如此，整个过程下来，不会有FGC，而YGC最多也就两三次而已。Recycler的代码列出如下：
+
+```scala
+class MeshRequest private(handle: Handle[MeshRequest]) {
+  private var cid: Long = _
+  private var buffer: ByteBuf = _
+  private var composite: CompositeByteBuf = _
+
+  def recycle = {
+    cid = 0l
+    buffer = null
+    composite = null
+    handle.recycle(this)
+  }
+
+  def toCustomProtocol(bb: ByteBuf) = {
+    val n = bb.indexOf(280, bb.readableBytes(), '='.toByte)
+    val parameter = bb.skipBytes(n + 1)
+    buffer.writeLong(cid)
+    buffer.writeInt(parameter.readableBytes())
+    composite.addComponents(true, buffer, parameter)
+  }
+
+}
+
+object MeshRequest {
+  private val RECYCLER = new Recycler[MeshRequest]() {
+    override def newObject(handle: Recycler.Handle[MeshRequest]): MeshRequest = {
+      new MeshRequest(handle)
+    }
+  }
+
+  def apply(id: Long): MeshRequest = {
+    val request = RECYCLER.get()
+    request.cid = id
+    request.buffer = ConsumerAgent.allocator.directBuffer(12)
+    request.composite = ConsumerAgent.allocator.compositeBuffer()
+    request
+  }
+}
+```
+
+最终，Netty版本的代码停留在6894，而Akka版本我没记错的话，应该是6400左右。
+
 ## 比赛经验总结和感想
 
-
-
+其实是第一次参加这种编程的比赛，开始的时候看得蛮轻，因为按照实际生产的场景来说，我的第一种方案肯定是非常好的，编码简单、健壮、可扩展性强，应该是能够出彩的。但是因为比赛是唯成绩论的，或者说至少在初赛和复赛的时候是唯成绩论的，所以后续不得已，只能放弃我对Akka的信仰，使用Netty写了一个版本的打铁代码，以往前冲击一个比较好的名次，然后来向大家吹嘘Akka。事实证明，限定场景来做极致优化的话，Netty确实好很多，不过，在通用场景下，用Akka stream的思想，则可以迅速构建出一个集各种流控功能于一体，也非常好扩展，并且性能也不会相差太多的组件。所以，不管怎样，到最终的总结还是，如果是我来开发这个Service Mesh组件，Akka和Akka Stream绝对会是主力，而Netty则可以被应用在不需要将数据读出内存的场景(如只负责转发或者解析自定义协议的Provider端)。两者相结合，应该可以达到比较好的平衡。
 
 
