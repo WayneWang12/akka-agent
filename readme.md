@@ -110,7 +110,7 @@
         import GraphDSL.Implicits._
         
         val balance = builder.add(Balance[ByteString](tcpFlows.size))
-        val bigMerge = builder.add(Merge[(Long, ByteString)](tcpFlows.size))
+        val bigMerge = builder.add(Merge[ByteString](tcpFlows.size))
         tcpFlows.foreach { tcp =>
           balance  ~> tcp ~> framing ~> bigMerge
         }
